@@ -1,0 +1,627 @@
+[
+    {
+        "id": "0e24e1a6d597087b",
+        "type": "tab",
+        "label": "Flow 1",
+        "disabled": false,
+        "info": "",
+        "env": []
+    },
+    {
+        "id": "flow_api",
+        "type": "tab",
+        "label": "REST API IoT",
+        "disabled": true,
+        "info": ""
+    },
+    {
+        "id": "flow_iot_v2",
+        "type": "tab",
+        "label": "REST API IoT v2",
+        "disabled": false,
+        "info": ""
+    },
+    {
+        "id": "mqtt_broker_config",
+        "type": "mqtt-broker",
+        "name": "Local Mosquitto",
+        "broker": "localhost",
+        "port": "1883",
+        "clientid": "node-red-backend",
+        "autoConnect": true,
+        "usetls": false,
+        "protocolVersion": "4"
+    },
+    {
+        "id": "57ab185b6426655a",
+        "type": "websocket-listener",
+        "path": "/ws/sensor",
+        "wholemsg": "false"
+    },
+    {
+        "id": "4871e0affb195fda",
+        "type": "sqlitedb",
+        "db": "D:/tira proyek/Praktikum_IoT/sensor.db",
+        "mode": "RWC"
+    },
+    {
+        "id": "mqtt_in",
+        "type": "mqtt in",
+        "z": "flow_iot_v2",
+        "name": "Subscribe Sensor",
+        "topic": "iot/sensor",
+        "qos": "0",
+        "datatype": "json",
+        "broker": "mqtt_broker_config",
+        "nl": false,
+        "rap": true,
+        "rh": 0,
+        "inputs": 0,
+        "x": 170,
+        "y": 130,
+        "wires": [
+            [
+                "fn_sensor"
+            ]
+        ]
+    },
+    {
+        "id": "fn_sensor",
+        "type": "function",
+        "z": "flow_iot_v2",
+        "name": "Proses Data Sensor",
+        "func": "var data = msg.payload;\nif (typeof data !== 'object' || data === null) {\n    node.warn('Payload sensor bukan JSON object');\n    return null;\n}\nvar suhu = Number(data.suhu);\nvar kelembaban = Number(data.kelembaban);\nif (!Number.isFinite(suhu) || !Number.isFinite(kelembaban)) {\n    node.warn('Data sensor tidak valid: ' + JSON.stringify(data));\n    return null;\n}\n\nvar threshold = Number(flow.get('threshold'));\nif (!Number.isFinite(threshold)) threshold = 30;\n\nvar waktu = new Date().toISOString();\nvar hasil = {\n    suhu: suhu,\n    kelembaban: kelembaban,\n    timestamp: data.timestamp || waktu,\n    received: waktu,\n    threshold: threshold,\n    alert: suhu > threshold\n};\nflow.set('lastSensor', hasil);\n\n// Query dibuat lengkap dengan nilainya (mode msg.topic tidak mengikat tanda ?)\nvar sql = {\n    topic: \"INSERT INTO sensor_history (suhu, kelembaban, waktu) VALUES (\" +\n           suhu + \", \" + kelembaban + \", '\" + waktu + \"')\"\n};\n\nvar ws = { payload: hasil };\n\n// Notifikasi MQTT (maksimal 1 kali per 30 detik)\nvar notif = null;\nif (hasil.alert) {\n    var pesan = 'PERINGATAN! Suhu ' + suhu + '°C melewati batas ' + threshold + '°C';\n    node.warn(pesan);\n    var last = flow.get('lastAlertTime') || 0;\n    if (Date.now() - last > 30000) {\n        flow.set('lastAlertTime', Date.now());\n        notif = { topic: 'iot/alert', payload: { type: 'alert', message: pesan, suhu: suhu, threshold: threshold, waktu: waktu } };\n    }\n}\nreturn [ws, sql, notif];",
+        "outputs": 3,
+        "timeout": 0,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 410,
+        "y": 130,
+        "wires": [
+            [
+                "ws_out",
+                "dbg_sensor"
+            ],
+            [
+                "sql_insert"
+            ],
+            [
+                "mqtt_alert"
+            ]
+        ]
+    },
+    {
+        "id": "ws_out",
+        "type": "websocket out",
+        "z": "flow_iot_v2",
+        "name": "WebSocket /ws/sensor",
+        "server": "57ab185b6426655a",
+        "client": "",
+        "x": 680,
+        "y": 60,
+        "wires": []
+    },
+    {
+        "id": "dbg_sensor",
+        "type": "debug",
+        "z": "flow_iot_v2",
+        "name": "Log Sensor",
+        "active": true,
+        "tosidebar": true,
+        "console": false,
+        "tostatus": false,
+        "complete": "payload",
+        "targetType": "msg",
+        "statusVal": "",
+        "statusType": "auto",
+        "x": 650,
+        "y": 100,
+        "wires": []
+    },
+    {
+        "id": "sql_insert",
+        "type": "sqlite",
+        "z": "flow_iot_v2",
+        "mydb": "4871e0affb195fda",
+        "sqlquery": "msg.topic",
+        "sql": "",
+        "name": "Simpan Riwayat SQLite",
+        "x": 680,
+        "y": 150,
+        "wires": [
+            []
+        ]
+    },
+    {
+        "id": "mqtt_alert",
+        "type": "mqtt out",
+        "z": "flow_iot_v2",
+        "name": "Publish Alert",
+        "topic": "",
+        "qos": "0",
+        "retain": "false",
+        "respTopic": "",
+        "contentType": "",
+        "userProps": "",
+        "correl": "",
+        "expiry": "",
+        "broker": "mqtt_broker_config",
+        "x": 660,
+        "y": 200,
+        "wires": []
+    },
+    {
+        "id": "inj_create",
+        "type": "inject",
+        "z": "flow_iot_v2",
+        "name": "Buat Tabel (otomatis saat start)",
+        "props": [
+            {
+                "p": "topic",
+                "vt": "str"
+            }
+        ],
+        "repeat": "",
+        "crontab": "",
+        "once": true,
+        "onceDelay": 2,
+        "topic": "CREATE TABLE IF NOT EXISTS sensor_history (id INTEGER PRIMARY KEY AUTOINCREMENT, suhu REAL, kelembaban REAL, waktu TEXT)",
+        "x": 220,
+        "y": 280,
+        "wires": [
+            [
+                "sql_admin"
+            ]
+        ]
+    },
+    {
+        "id": "inj_clean",
+        "type": "inject",
+        "z": "flow_iot_v2",
+        "name": "Bersihkan data NULL",
+        "props": [
+            {
+                "p": "topic",
+                "vt": "str"
+            }
+        ],
+        "repeat": "",
+        "crontab": "",
+        "once": false,
+        "onceDelay": 2,
+        "topic": "DELETE FROM sensor_history WHERE suhu IS NULL OR kelembaban IS NULL",
+        "x": 190,
+        "y": 330,
+        "wires": [
+            [
+                "sql_admin"
+            ]
+        ]
+    },
+    {
+        "id": "inj_select",
+        "type": "inject",
+        "z": "flow_iot_v2",
+        "name": "Uji SELECT Database",
+        "props": [
+            {
+                "p": "topic",
+                "vt": "str"
+            }
+        ],
+        "repeat": "",
+        "crontab": "",
+        "once": false,
+        "onceDelay": 2,
+        "topic": "SELECT * FROM sensor_history ORDER BY id DESC LIMIT 10",
+        "x": 190,
+        "y": 380,
+        "wires": [
+            [
+                "sql_admin"
+            ]
+        ]
+    },
+    {
+        "id": "sql_admin",
+        "type": "sqlite",
+        "z": "flow_iot_v2",
+        "mydb": "4871e0affb195fda",
+        "sqlquery": "msg.topic",
+        "sql": "",
+        "name": "SQLite Admin",
+        "x": 500,
+        "y": 330,
+        "wires": [
+            [
+                "dbg_admin"
+            ]
+        ]
+    },
+    {
+        "id": "dbg_admin",
+        "type": "debug",
+        "z": "flow_iot_v2",
+        "name": "Hasil Admin SQLite",
+        "active": true,
+        "tosidebar": true,
+        "console": false,
+        "tostatus": false,
+        "complete": "payload",
+        "targetType": "msg",
+        "statusVal": "",
+        "statusType": "auto",
+        "x": 740,
+        "y": 330,
+        "wires": []
+    },
+    {
+        "id": "in_suhu",
+        "type": "http in",
+        "z": "flow_iot_v2",
+        "name": "GET /api/suhu",
+        "url": "/api/suhu",
+        "method": "get",
+        "upload": false,
+        "skipBodyParsing": false,
+        "swaggerDoc": "",
+        "x": 170,
+        "y": 460,
+        "wires": [
+            [
+                "fn_suhu"
+            ]
+        ]
+    },
+    {
+        "id": "fn_suhu",
+        "type": "function",
+        "z": "flow_iot_v2",
+        "name": "Build Response Suhu",
+        "func": "var data = flow.get('lastSensor') || {\n    suhu: null, kelembaban: null, timestamp: null, alert: false,\n    threshold: Number(flow.get('threshold')) || 30\n};\nmsg.statusCode = 200;\nmsg.payload = { status: 'success', data: data, server_time: new Date().toISOString() };\nreturn msg;",
+        "outputs": 1,
+        "timeout": 0,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 420,
+        "y": 460,
+        "wires": [
+            [
+                "resp_suhu"
+            ]
+        ]
+    },
+    {
+        "id": "resp_suhu",
+        "type": "http response",
+        "z": "flow_iot_v2",
+        "name": "",
+        "statusCode": "",
+        "headers": {
+            "Access-Control-Allow-Origin": "*",
+            "Access-Control-Allow-Headers": "Content-Type, X-API-Key",
+            "Access-Control-Allow-Methods": "GET, POST, PUT, OPTIONS"
+        },
+        "x": 660,
+        "y": 460,
+        "wires": []
+    },
+    {
+        "id": "in_hist",
+        "type": "http in",
+        "z": "flow_iot_v2",
+        "name": "GET /api/history",
+        "url": "/api/history",
+        "method": "get",
+        "upload": false,
+        "skipBodyParsing": false,
+        "swaggerDoc": "",
+        "x": 170,
+        "y": 530,
+        "wires": [
+            [
+                "fn_hist_q"
+            ]
+        ]
+    },
+    {
+        "id": "fn_hist_q",
+        "type": "function",
+        "z": "flow_iot_v2",
+        "name": "Query History",
+        "func": "msg.topic = \"SELECT suhu, kelembaban, waktu FROM sensor_history WHERE suhu IS NOT NULL ORDER BY id DESC LIMIT 50\";\nreturn msg;",
+        "outputs": 1,
+        "timeout": 0,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 400,
+        "y": 530,
+        "wires": [
+            [
+                "sql_read"
+            ]
+        ]
+    },
+    {
+        "id": "sql_read",
+        "type": "sqlite",
+        "z": "flow_iot_v2",
+        "mydb": "4871e0affb195fda",
+        "sqlquery": "msg.topic",
+        "sql": "",
+        "name": "Baca Riwayat SQLite",
+        "x": 620,
+        "y": 530,
+        "wires": [
+            [
+                "fn_hist_f"
+            ]
+        ]
+    },
+    {
+        "id": "fn_hist_f",
+        "type": "function",
+        "z": "flow_iot_v2",
+        "name": "Format History",
+        "func": "var rows = Array.isArray(msg.payload) ? msg.payload : [];\nmsg.statusCode = 200;\nmsg.payload = {\n    status: 'success',\n    count: rows.length,\n    data: rows.reverse().map(function (r) {\n        return { suhu: r.suhu, kelembaban: r.kelembaban, timestamp: r.waktu, received: r.waktu };\n    })\n};\nreturn msg;",
+        "outputs": 1,
+        "timeout": 0,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 840,
+        "y": 530,
+        "wires": [
+            [
+                "resp_hist"
+            ]
+        ]
+    },
+    {
+        "id": "resp_hist",
+        "type": "http response",
+        "z": "flow_iot_v2",
+        "name": "",
+        "statusCode": "",
+        "headers": {
+            "Access-Control-Allow-Origin": "*",
+            "Access-Control-Allow-Headers": "Content-Type, X-API-Key",
+            "Access-Control-Allow-Methods": "GET, POST, PUT, OPTIONS"
+        },
+        "x": 1050,
+        "y": 530,
+        "wires": []
+    },
+    {
+        "id": "catch_hist",
+        "type": "catch",
+        "z": "flow_iot_v2",
+        "name": "",
+        "scope": [
+            "sql_read"
+        ],
+        "uncaught": false,
+        "x": 400,
+        "y": 590,
+        "wires": [
+            [
+                "fn_hist_e"
+            ]
+        ]
+    },
+    {
+        "id": "fn_hist_e",
+        "type": "function",
+        "z": "flow_iot_v2",
+        "name": "Error History",
+        "func": "msg.statusCode = 500;\nmsg.payload = { status: 'error', message: 'Gagal membaca database' };\nreturn msg;",
+        "outputs": 1,
+        "timeout": 0,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 620,
+        "y": 590,
+        "wires": [
+            [
+                "resp_hist"
+            ]
+        ]
+    },
+    {
+        "id": "in_kontrol",
+        "type": "http in",
+        "z": "flow_iot_v2",
+        "name": "POST /api/kontrol",
+        "url": "/api/kontrol",
+        "method": "post",
+        "upload": false,
+        "skipBodyParsing": false,
+        "swaggerDoc": "",
+        "x": 180,
+        "y": 680,
+        "wires": [
+            [
+                "fn_kontrol"
+            ]
+        ]
+    },
+    {
+        "id": "fn_kontrol",
+        "type": "function",
+        "z": "flow_iot_v2",
+        "name": "Validasi & Publish",
+        "func": "if (msg.req.headers['x-api-key'] !== 'iot-rahasia-2026') {\n    msg.statusCode = 401;\n    msg.payload = { status: 'error', message: 'API Key tidak valid' };\n    return [msg, null];\n}\nvar body = msg.payload;\nif (!body || !body.device || !body.action) {\n    msg.statusCode = 400;\n    msg.payload = { status: 'error', message: 'device dan action wajib diisi' };\n    return [msg, null];\n}\nvar mqttMsg = { topic: 'iot/kontrol', payload: body };\nmsg.statusCode = 200;\nmsg.payload = { status: 'success', message: 'Perintah terkirim', sent: body };\nreturn [msg, mqttMsg];",
+        "outputs": 2,
+        "timeout": 0,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 420,
+        "y": 680,
+        "wires": [
+            [
+                "resp_kontrol"
+            ],
+            [
+                "mqtt_kontrol"
+            ]
+        ]
+    },
+    {
+        "id": "resp_kontrol",
+        "type": "http response",
+        "z": "flow_iot_v2",
+        "name": "",
+        "statusCode": "",
+        "headers": {
+            "Access-Control-Allow-Origin": "*",
+            "Access-Control-Allow-Headers": "Content-Type, X-API-Key",
+            "Access-Control-Allow-Methods": "GET, POST, PUT, OPTIONS"
+        },
+        "x": 660,
+        "y": 660,
+        "wires": []
+    },
+    {
+        "id": "mqtt_kontrol",
+        "type": "mqtt out",
+        "z": "flow_iot_v2",
+        "name": "Publish Kontrol",
+        "topic": "",
+        "qos": "0",
+        "retain": "false",
+        "respTopic": "",
+        "contentType": "",
+        "userProps": "",
+        "correl": "",
+        "expiry": "",
+        "broker": "mqtt_broker_config",
+        "x": 670,
+        "y": 710,
+        "wires": []
+    },
+    {
+        "id": "in_thr",
+        "type": "http in",
+        "z": "flow_iot_v2",
+        "name": "PUT /api/threshold",
+        "url": "/api/threshold",
+        "method": "put",
+        "upload": false,
+        "skipBodyParsing": false,
+        "swaggerDoc": "",
+        "x": 190,
+        "y": 790,
+        "wires": [
+            [
+                "fn_thr"
+            ]
+        ]
+    },
+    {
+        "id": "fn_thr",
+        "type": "function",
+        "z": "flow_iot_v2",
+        "name": "Validasi Key & Simpan Threshold",
+        "func": "if (msg.req.headers['x-api-key'] !== 'iot-rahasia-2026') {\n    msg.statusCode = 401;\n    msg.payload = { status: 'error', message: 'API Key tidak valid' };\n    return msg;\n}\nvar body = msg.payload || {};\nvar threshold = Number(body.threshold);\nif (body.threshold === undefined || !Number.isFinite(threshold) || threshold <= 0) {\n    msg.statusCode = 400;\n    msg.payload = { status: 'error', message: 'Nilai threshold harus berupa angka lebih dari 0' };\n    return msg;\n}\nflow.set('threshold', threshold);\nmsg.statusCode = 200;\nmsg.payload = { status: 'success', message: 'Threshold berhasil diperbarui', threshold: threshold };\nreturn msg;",
+        "outputs": 1,
+        "timeout": 0,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 440,
+        "y": 790,
+        "wires": [
+            [
+                "resp_thr"
+            ]
+        ]
+    },
+    {
+        "id": "resp_thr",
+        "type": "http response",
+        "z": "flow_iot_v2",
+        "name": "",
+        "statusCode": "",
+        "headers": {
+            "Access-Control-Allow-Origin": "*",
+            "Access-Control-Allow-Headers": "Content-Type, X-API-Key",
+            "Access-Control-Allow-Methods": "GET, POST, PUT, OPTIONS"
+        },
+        "x": 700,
+        "y": 790,
+        "wires": []
+    },
+    {
+        "id": "in_opt",
+        "type": "http in",
+        "z": "flow_iot_v2",
+        "name": "OPTIONS CORS",
+        "url": "/api/*",
+        "method": "options",
+        "upload": false,
+        "skipBodyParsing": false,
+        "swaggerDoc": "",
+        "x": 170,
+        "y": 860,
+        "wires": [
+            [
+                "fn_opt"
+            ]
+        ]
+    },
+    {
+        "id": "fn_opt",
+        "type": "function",
+        "z": "flow_iot_v2",
+        "name": "CORS Preflight",
+        "func": "msg.statusCode = 204;\nmsg.payload = '';\nreturn msg;",
+        "outputs": 1,
+        "timeout": 0,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 400,
+        "y": 860,
+        "wires": [
+            [
+                "resp_opt"
+            ]
+        ]
+    },
+    {
+        "id": "resp_opt",
+        "type": "http response",
+        "z": "flow_iot_v2",
+        "name": "",
+        "statusCode": "",
+        "headers": {
+            "Access-Control-Allow-Origin": "*",
+            "Access-Control-Allow-Headers": "Content-Type, X-API-Key",
+            "Access-Control-Allow-Methods": "GET, POST, PUT, OPTIONS"
+        },
+        "x": 630,
+        "y": 860,
+        "wires": []
+    },
+    {
+        "id": "48b6c51d44e38319",
+        "type": "global-config",
+        "env": [],
+        "modules": {
+            "node-red-node-sqlite": "2.0.1"
+        }
+    }
+]
